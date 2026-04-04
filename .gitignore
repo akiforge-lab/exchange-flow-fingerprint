@@ -1,0 +1,25 @@
+# ── collected / generated data ───────────────────────────────────────────────
+data/snapshots/
+data/prices/
+data/panel.csv
+
+# runtime state written by the dashboard (regenerated automatically)
+data/.auto.json
+data/.collector.pid
+data/.decisions.json
+
+# ── Claude Code ───────────────────────────────────────────────────────────────
+# keep .claude/launch.json (shared launch config)
+.claude/settings.local.json
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# ── OS ────────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
