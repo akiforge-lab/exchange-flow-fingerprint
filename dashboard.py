@@ -51,6 +51,49 @@ AUTO_REFRESH_S     = 60   # page auto-refresh interval when auto mode is on
 
 st.set_page_config(page_title="Exchange Flow", layout="wide", initial_sidebar_state="expanded")
 
+# ── timezone helpers (display only — storage stays UTC) ───────────────────────
+
+_MYT = datetime.timezone(datetime.timedelta(hours=8))
+
+
+def _to_myt(dt: datetime.datetime) -> datetime.datetime:
+    """Convert any datetime (UTC-aware or naive-UTC) to Malaysia time."""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=datetime.timezone.utc)
+    return dt.astimezone(_MYT)
+
+
+def _rel(dt: datetime.datetime) -> str:
+    """Return a human-friendly relative string: '3 min ago', '1 h ago', etc."""
+    secs = (datetime.datetime.now(tz=_MYT) - dt.astimezone(_MYT)).total_seconds()
+    if secs < 0:
+        return "just now"
+    if secs < 90:
+        return f"{int(secs)}s ago"
+    if secs < 3600:
+        return f"{int(secs / 60)} min ago"
+    if secs < 86400:
+        return f"{int(secs / 3600)}h ago"
+    return f"{int(secs / 86400)}d ago"
+
+
+def _fmt_ts(dt: datetime.datetime, fmt: str = "%H:%M") -> str:
+    """Format a datetime as 'HH:MM MYT (X min ago)'."""
+    myt = _to_myt(dt)
+    return f"{myt.strftime(fmt)} MYT ({_rel(myt)})"
+
+
+def _fmt_iso(iso_str: str, fmt: str = "%H:%M") -> str:
+    """Parse an ISO timestamp string and return _fmt_ts output."""
+    try:
+        dt = datetime.datetime.fromisoformat(iso_str)
+        # Naive strings stored by this app are already MYT (datetime.now() on local machine)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=_MYT)
+        return _fmt_ts(dt, fmt)
+    except (ValueError, TypeError):
+        return iso_str or "unknown"
+
 # ── collection helpers ────────────────────────────────────────────────────────
 
 def _collector_pid() -> int | None:
@@ -104,9 +147,10 @@ def last_snapshot_info() -> tuple[str, float]:
     if not files:
         return "none", -1
     try:
-        dt  = datetime.datetime.strptime(files[-1].stem, "%Y%m%d_%H%M%S")
-        age = (datetime.datetime.now() - dt).total_seconds()
-        return f"{dt.strftime('%H:%M:%S')} ({age:.0f}s ago)", age
+        dt_utc = datetime.datetime.strptime(files[-1].stem, "%Y%m%d_%H%M%S")
+        dt_utc = dt_utc.replace(tzinfo=datetime.timezone.utc)
+        age    = (datetime.datetime.now(tz=datetime.timezone.utc) - dt_utc).total_seconds()
+        return _fmt_ts(dt_utc, fmt="%H:%M:%S"), age
     except ValueError:
         return files[-1].name, -1
 
@@ -727,7 +771,7 @@ def sidebar(panel_path: str) -> tuple[list[str], str]:
     coll_label  = "Running" if running else "Stopped"
     rebuild_pid = state.get("rebuild_pid")
     rebuild_str = "rebuilding..." if _rebuild_running(rebuild_pid) else (
-        state.get("last_rebuild_time") or "never"
+        _fmt_iso(state["last_rebuild_time"]) if state.get("last_rebuild_time") else "never"
     )
     n_disk  = _n_snapshots_on_disk()
     n_last  = state.get("last_rebuild_n", 0)
@@ -801,9 +845,11 @@ def sidebar(panel_path: str) -> tuple[list[str], str]:
     t0   = df["fetched_at"].min()
     t1   = df["fetched_at"].max()
     span = (t1 - t0).total_seconds() / 60
+    t0m  = _to_myt(t0.to_pydatetime())
+    t1m  = _to_myt(t1.to_pydatetime())
     st.sidebar.caption(
         f"{df['symbol'].nunique()} symbols | {n_panel} snapshots\n"
-        f"{t0.strftime('%b %d %H:%M')} -- {t1.strftime('%H:%M')} UTC ({span:.0f} min)"
+        f"{t0m.strftime('%b %d %H:%M')} – {t1m.strftime('%H:%M')} MYT ({span:.0f} min)"
     )
 
     return exec_exchanges, detail_symbol
@@ -833,7 +879,7 @@ def _opportunities_live(panel_path: str, prices_dir: str, exec_exchanges: list[s
     computing  = state.get("decisions_computing", False)
     status_sfx = "  ·  _updating..._" if computing else ""
     st.caption(
-        f"Exec: {exec_str}  ·  computed {computed_at}{status_sfx}"
+        f"Exec: {exec_str}  ·  computed {_fmt_iso(computed_at) if computed_at else 'just now'}{status_sfx}"
     )
 
     col_f1, col_f2, col_f3 = st.columns([2, 2, 6])
