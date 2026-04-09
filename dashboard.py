@@ -595,6 +595,24 @@ def compute_decisions(panel_path: str, prices_dir: str,
         authority  = pd.DataFrame()
         leader_exs = set()
 
+    # Hysteresis: symbols that were already "YES" get a lower exit threshold.
+    # This prevents oscillation around the entry threshold from causing churn.
+    try:
+        _prev, _ = load_decisions()
+        prev_yes = set(_prev.loc[_prev["opportunity"] == "YES", "symbol"].tolist()) \
+                   if _prev is not None and "opportunity" in _prev.columns else set()
+    except Exception:
+        prev_yes = set()
+
+    ENTRY_THRESHOLD    = 0.38
+    EXIT_THRESHOLD     = 0.28   # ~10-point hysteresis band
+    ENTRY_NO_EXEC      = 0.45
+    EXIT_NO_EXEC       = 0.35
+
+    # Smooth point-in-time rates over this many snapshots to reduce tick noise.
+    # 5 snapshots ≈ 5 min at 60s cadence -- negligible lag for 500-1000 min holding.
+    SMOOTH_WIN = 5
+
     rows: list[dict] = []
     for sym, sub in df.groupby("symbol"):
         pivot = (sub.pivot_table(index="fetched_at", columns="exchange",
@@ -620,8 +638,10 @@ def compute_decisions(panel_path: str, prices_dir: str,
         full_cons    = delta.median(axis=1)
 
         # ── 1. Rate extreme: current rate vs history ──────────────────────────
+        # Use a short rolling mean for current_rate to absorb tick noise.
         cons_rate    = pivot.median(axis=1)
-        current_rate = float(cons_rate.iloc[-1])
+        sw           = min(SMOOTH_WIN, len(cons_rate))
+        current_rate = float(cons_rate.iloc[-sw:].mean())
         rate_mean    = float(cons_rate.mean())
         rate_std     = float(cons_rate.std())
 
@@ -655,7 +675,7 @@ def compute_decisions(panel_path: str, prices_dir: str,
         for ex in exec_exchanges:
             if ex not in pivot.columns:
                 continue
-            val = float(pivot[ex].iloc[-1]) if pd.notna(pivot[ex].iloc[-1]) else float("nan")
+            val = float(pivot[ex].iloc[-sw:].mean()) if pivot[ex].iloc[-sw:].notna().any() else float("nan")
             if pd.notna(val):
                 exec_rates_now.append(val)
             m = _lead_score_for(delta, ex, signal_cons)
@@ -668,7 +688,7 @@ def compute_decisions(panel_path: str, prices_dir: str,
 
         # Reference point for the gap: leader median rate if available,
         # otherwise full consensus rate.
-        leader_rate_now = (float(pivot[leader_cols].iloc[-1].median())
+        leader_rate_now = (float(np.nanmedian(pivot[leader_cols].iloc[-sw:].values))
                            if leader_cols else float("nan"))
         ref_rate = leader_rate_now if pd.notna(leader_rate_now) else current_rate
         if pd.notna(exec_rate_now) and rate_std > 1e-10:
@@ -688,19 +708,22 @@ def compute_decisions(panel_path: str, prices_dir: str,
             0.15 * data_qual
         )
 
-        # ── Opportunity flag ──────────────────────────────────────────────────
+        # ── Opportunity flag (with hysteresis) ───────────────────────────────
         has_structural = abs(rate_zscore) > 0.8 or trend_persist > 0.35
         leader_moving  = use_leader_cons and trend_persist > 0.25
+        was_yes        = sym in prev_yes
+        thresh         = EXIT_THRESHOLD  if was_yes else ENTRY_THRESHOLD
+        thresh_nx      = EXIT_NO_EXEC    if was_yes else ENTRY_NO_EXEC
         if has_exec:
             opportunity = (
-                watch_score >= 0.38
+                watch_score >= thresh
                 and has_structural
                 and exec_active >= 1
                 and (leader_gap > 0.10 or (pd.notna(exec_lag) and exec_lag < -0.02))
             )
         else:
             opportunity = (
-                watch_score >= 0.45
+                watch_score >= thresh_nx
                 and has_structural
                 and (leader_moving or abs(rate_zscore) > 1.0)
             )
@@ -731,7 +754,8 @@ def compute_decisions(panel_path: str, prices_dir: str,
     out = pd.DataFrame(rows)
     out["_s1"] = (out["opportunity"] == "YES").astype(int)
     out["_s2"] = out["confidence"].map({"high": 3, "moderate": 2, "low": 1}).fillna(0)
-    out = (out.sort_values(["_s1", "_s2", "watch_score"], ascending=[False, False, False])
+    out = (out.sort_values(["_s1", "_s2", "watch_score", "symbol"],
+                            ascending=[False, False, False, True])
               .drop(columns=["_s1", "_s2"])
               .reset_index(drop=True))
     out.index = out.index + 1
