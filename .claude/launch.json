@@ -2,18 +2,6 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "[Collect] Live data feed (every 60s)",
-      "runtimeExecutable": "py",
-      "runtimeArgs": ["fetch.py", "--loop", "60"],
-      "port": 0
-    },
-    {
-      "name": "[Build] Rebuild panel from snapshots",
-      "runtimeExecutable": "py",
-      "runtimeArgs": ["build_panel.py"],
-      "port": 0
-    },
-    {
       "name": "[Dashboard] View results",
       "runtimeExecutable": "pythonw",
       "runtimeArgs": ["-m", "streamlit", "run", "dashboard.py"],
