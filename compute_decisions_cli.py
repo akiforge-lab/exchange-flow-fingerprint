@@ -343,6 +343,7 @@ def compute_decisions(panel_path: str, exec_exchanges: tuple) -> pd.DataFrame:
 # ── entry point ────────────────────────────────────────────────────────────────
 
 def main() -> None:
+    global DECISIONS_CACHE
     parser = argparse.ArgumentParser(description="Compute and save funding-rate decisions.")
     parser.add_argument("--panel", default=str(PANEL_DEFAULT),
                         help="Path to panel CSV (default: data/panel.csv)")
@@ -353,7 +354,6 @@ def main() -> None:
                         help="Output path for decisions JSON")
     args = parser.parse_args()
 
-    global DECISIONS_CACHE
     DECISIONS_CACHE = pathlib.Path(args.out)
 
     panel_path = pathlib.Path(args.panel)
