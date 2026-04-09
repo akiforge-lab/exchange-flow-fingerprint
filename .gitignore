@@ -8,6 +8,11 @@ data/.auto.json
 data/.collector.pid
 data/.decisions.json
 
+# pipeline runtime artifacts
+data/fetch.log
+data/pipeline.log
+data/.pipeline.lock
+
 # ── Claude Code ───────────────────────────────────────────────────────────────
 # keep .claude/launch.json (shared launch config)
 .claude/settings.local.json

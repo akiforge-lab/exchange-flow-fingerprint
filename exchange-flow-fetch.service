@@ -1,0 +1,19 @@
+[Unit]
+Description=Exchange-Flow Funding Rate Fetcher
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=openclaw
+Group=openclaw
+WorkingDirectory=/home/openclaw/exchange-flow-fingerprint
+ExecStart=/home/openclaw/exchange-flow-fingerprint/.venv/bin/python fetch.py --loop 60
+Restart=on-failure
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=exchange-flow-fetch
+
+[Install]
+WantedBy=multi-user.target
