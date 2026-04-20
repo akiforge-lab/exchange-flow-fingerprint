@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block title %}Detail{% endblock %}
+{% block content %}
+  {% if panel_error %}
+    <div class="warning">{{ panel_error }}</div>
+  {% endif %}
+
+  {% if symbols %}
+    <form method="get" action="/detail" class="filters">
+      <label>
+        Symbol
+        <select name="symbol" onchange="this.form.submit()">
+          {% for sym in symbols %}
+            <option value="{{ sym }}" {% if sym == selected_symbol %}selected{% endif %}>{{ sym }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </form>
+  {% endif %}
+
+  {% if detail_warning %}
+    <div class="warning">{{ detail_warning }}</div>
+  {% endif %}
+
+  {% if selected_symbol %}
+    <section class="section">
+      <h2>{{ selected_symbol }} — Price vs Funding</h2>
+      {% if price_funding_json %}
+        <div id="price-funding-chart" style="height: 320px;"></div>
+        <script>
+          const priceFig = {{ price_funding_json | safe }};
+          Plotly.newPlot("price-funding-chart", priceFig.data, priceFig.layout);
+        </script>
+      {% else %}
+        <p>No price data available for this symbol.</p>
+      {% endif %}
+    </section>
+
+    <section class="section">
+      <h2>Funding Rate Levels</h2>
+      {% if funding_levels_json %}
+        <div id="funding-levels-chart" style="height: 300px;"></div>
+        <script>
+          const levelsFig = {{ funding_levels_json | safe }};
+          Plotly.newPlot("funding-levels-chart", levelsFig.data, levelsFig.layout);
+        </script>
+      {% else %}
+        <p>Chart unavailable.</p>
+      {% endif %}
+    </section>
+
+    <section class="section">
+      <h2>Rate Delta vs Consensus</h2>
+      {% if funding_delta_json %}
+        <div id="funding-delta-chart" style="height: 260px;"></div>
+        <script>
+          const deltaFig = {{ funding_delta_json | safe }};
+          Plotly.newPlot("funding-delta-chart", deltaFig.data, deltaFig.layout);
+        </script>
+      {% else %}
+        <p>Chart unavailable.</p>
+      {% endif %}
+    </section>
+
+    <section class="section">
+      <h2>Exchange Metrics</h2>
+      {% if metrics_rows %}
+        <table>
+          <thead>
+            <tr>
+              <th>Exchange</th>
+              <th>Lead score</th>
+              <th>% zero</th>
+              <th>Change mag</th>
+              <th>Fwd corr</th>
+              <th>Lag corr</th>
+              <th>Excess abs</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in metrics_rows %}
+              <tr>
+                <td>{{ row.exchange }}</td>
+                <td>{{ row.lead_score }}</td>
+                <td>{{ row.pct_zero }}</td>
+                <td>{{ row.change_mag }}</td>
+                <td>{{ row.fwd_corr }}</td>
+                <td>{{ row.lag_corr }}</td>
+                <td>{{ row.excess_abs }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p>No metrics available.</p>
+      {% endif %}
+    </section>
+
+    <section class="section">
+      <h2>Exchange Authority</h2>
+      {% if authority_rows %}
+        <table>
+          <thead>
+            <tr>
+              <th>Exchange</th>
+              <th>Avg lead</th>
+              <th>Symbols</th>
+              <th>Role</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in authority_rows %}
+              <tr>
+                <td>{{ row.exchange }}</td>
+                <td>{{ row.avg_lead }}</td>
+                <td>{{ row.symbol_count }}</td>
+                <td>{{ row.role }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p>No authority data available.</p>
+      {% endif %}
+    </section>
+  {% endif %}
+{% endblock %}

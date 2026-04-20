@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Opportunities{% endblock %}
+{% block head_extra %}
+  <meta http-equiv="refresh" content="60" />
+{% endblock %}
+{% block content %}
+  <section class="section">
+    <form method="get" action="/" class="filters">
+      <input type="hidden" name="opp_only" value="0" />
+      <label>
+        <input type="checkbox" name="opp_only" value="1" onchange="this.form.submit()" {% if filters.opp_only %}checked{% endif %} />
+        Opportunities only
+      </label>
+      <label>
+        Min confidence
+        <select name="confidence" onchange="this.form.submit()">
+          {% for level in ['all','low','moderate','high'] %}
+            <option value="{{ level }}" {% if filters.confidence == level %}selected{% endif %}>{{ level|capitalize }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </form>
+    <p class="caption">
+      Exec venues: {{ exec_exchanges|join(', ') if exec_exchanges else 'none configured' }}
+    </p>
+  </section>
+
+  {% if warning %}
+    <div class="warning">{{ warning }}</div>
+  {% endif %}
+
+  {% if decisions %}
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Symbol</th>
+          <th>Opp</th>
+          <th>Direction</th>
+          <th>Confidence</th>
+          <th>Watch score</th>
+          <th>Leader gap</th>
+          <th>Exec lag</th>
+          <th>Reason</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in decisions %}
+          <tr style="{{ row.row_style }}">
+            <td>{{ row.rank }}</td>
+            <td>{{ row.symbol }}</td>
+            <td>{{ row.opportunity }}</td>
+            <td>{{ row.direction }}</td>
+            <td>{{ row.confidence }}</td>
+            <td>{{ '{:.3f}'.format(row.watch_score|default(0)) if row.watch_score is not none else '—' }}</td>
+            <td>{{ '{:.3f}'.format(row.leader_gap|default(0)) if row.leader_gap is not none else '—' }}</td>
+            <td>{{ '{:.3f}'.format(row.exec_lag|default(0)) if row.exec_lag is not none else '—' }}</td>
+            <td>{{ row.reason }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p>No decisions available.</p>
+  {% endif %}
+
+  <p class="caption">
+    Computed at: {{ computed_at or 'unknown' }}
+  </p>
+{% endblock %}

@@ -3,8 +3,8 @@
   "configurations": [
     {
       "name": "[Dashboard] View results",
-      "runtimeExecutable": "pythonw",
-      "runtimeArgs": ["-m", "streamlit", "run", "dashboard.py"],
+      "runtimeExecutable": "uvicorn",
+      "runtimeArgs": ["app:app", "--host", "0.0.0.0", "--port", "8501", "--reload"],
       "port": 8501
     }
   ]
