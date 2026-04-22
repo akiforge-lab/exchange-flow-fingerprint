@@ -65,29 +65,59 @@ def compute_weight_suggestions(
     records: list[dict],
     current_cfg: dict,
     min_records: int,
+    min_exec_count: int = 1,
+    min_active_exchanges: int = 3,
 ) -> dict[str, dict]:
     """
     For each weight key, compute Spearman rho of its component against
     direction_correct, then suggest a new weight (bounded, normalised).
 
-    Returns a dict keyed by weight name:
+    Records are filtered before correlation:
+    - Only evaluated (direction_correct not null) and non-NEUTRAL direction.
+    - min_exec_count (default 1): exclude records where exec_count < N.
+      This prevents records where leader_gap=0.0 due to missing exec data
+      from diluting the leader_gap↔outcome correlation.
+    - min_active_exchanges (default 3): exclude thin-panel runs.
+
+    Records that pre-date the health fields (no "exec_count" key) are treated
+    as exec_count=999 so they are NOT excluded — backward compatible with
+    logs written before this change.
+
+    Returns a dict keyed by weight name plus a "_summary" meta key:
       {
-        "current": float,
-        "rho": float | None,
-        "raw_delta": float | None,
-        "capped_delta": float | None,
-        "suggested": float,
-        "n": int,
+        "w_rate_extreme": {"current", "rho", "raw_delta", "capped_delta", "suggested", "n"},
+        ...
+        "_summary": {"n_total_evaluated", "n_after_filter", "n_excluded_degraded",
+                     "min_exec_count", "min_active_exchanges"},
       }
     """
-    # Filter to records with evaluated outcomes and non-NEUTRAL direction
-    evaluated = [
+    # All evaluated, non-NEUTRAL records (before degradation filter)
+    all_evaluated = [
         r for r in records
         if r.get("direction_correct") is not None
         and r.get("direction") not in ("NEUTRAL", None)
     ]
 
-    result: dict[str, dict] = {}
+    # Apply data-health filter.
+    # Records lacking health fields (written before this change) pass through
+    # unfiltered (treated as 999) to preserve backward compatibility.
+    evaluated = [
+        r for r in all_evaluated
+        if r.get("exec_count", 999) >= min_exec_count
+        and r.get("active_exchanges", 999) >= min_active_exchanges
+    ]
+
+    n_excluded = len(all_evaluated) - len(evaluated)
+
+    result: dict[str, dict] = {
+        "_summary": {
+            "n_total_evaluated":      len(all_evaluated),
+            "n_after_filter":         len(evaluated),
+            "n_excluded_degraded":    n_excluded,
+            "min_exec_count":         min_exec_count,
+            "min_active_exchanges":   min_active_exchanges,
+        }
+    }
 
     if len(evaluated) < min_records:
         for wk in _WEIGHT_KEYS:
@@ -178,10 +208,30 @@ def print_tuning_report(suggestions: dict[str, dict], current_cfg: dict, apply: 
     print("\n## Weight Tuning Report\n")
     print(f"Current config: {config_summary(current_cfg)}\n")
 
+    # Print data-health filter summary if present
+    meta = suggestions.get("_summary", {})
+    if meta:
+        n_total  = meta.get("n_total_evaluated", "?")
+        n_after  = meta.get("n_after_filter", "?")
+        n_excl   = meta.get("n_excluded_degraded", 0)
+        min_exc  = meta.get("min_exec_count", "?")
+        min_act  = meta.get("min_active_exchanges", "?")
+        print(f"Records: {n_total} evaluated, {n_after} used for correlation "
+              f"({n_excl} excluded: exec_count<{min_exc} or active_exchanges<{min_act})")
+        if n_excl > 0:
+            frac = n_excl / max(n_total, 1)
+            if frac > 0.20:
+                print(f"  ⚠  {frac:.0%} of evaluated records excluded as degraded — "
+                      f"weight suggestions may be unreliable. "
+                      f"Investigate data gaps before applying.")
+        print()
+
     changed = False
     print(f"{'Component':18s}  {'current':>8s}  {'rho':>7s}  {'delta':>7s}  {'suggested':>9s}  n")
     print("-" * 68)
     for wk, info in suggestions.items():
+        if wk == "_summary":
+            continue
         col = _COMPONENT_MAP.get(wk, wk)
         rho_s  = f"{info['rho']:+.3f}"  if info["rho"]         is not None else "    —"
         dlt_s  = f"{info['capped_delta']:+.3f}" if info["capped_delta"] is not None else "    —"
@@ -213,6 +263,12 @@ def main() -> None:
                         help="Persist suggested weights to data/scoring_config.json")
     parser.add_argument("--dry-run",     action="store_true",
                         help="Show suggestions without applying (default behaviour)")
+    parser.add_argument("--min-exec-count", default=1, type=int,
+                        help="Exclude records where exec_count < N from correlation (default 1). "
+                             "Prevents NaN-zeroed leader_gap from diluting weight suggestions.")
+    parser.add_argument("--min-active-exchanges", default=3, type=int,
+                        help="Exclude records where active_exchanges < N (default 3). "
+                             "Prevents thin-panel runs from skewing correlation.")
     args = parser.parse_args()
 
     log_path = pathlib.Path(args.log)
@@ -222,7 +278,11 @@ def main() -> None:
         sys.exit(0)
 
     current_cfg = load_config()
-    suggestions = compute_weight_suggestions(records, current_cfg, args.min_records)
+    suggestions = compute_weight_suggestions(
+        records, current_cfg, args.min_records,
+        min_exec_count=args.min_exec_count,
+        min_active_exchanges=args.min_active_exchanges,
+    )
 
     print_tuning_report(suggestions, current_cfg, apply=args.apply)
 

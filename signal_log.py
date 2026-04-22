@@ -20,8 +20,18 @@ Schema (one JSON object per line):
   data_qual       float
   cons_rate       float   (consensus rate at snapshot time)
   rate_std        float
-  venues          list[{venue, edge_norm, edge_dir, recommendation, venue_rate}]
+  venues          list[{venue, edge_norm, edge_dir, recommendation, venue_rate, coverage}]
   best_venue      str | null
+  # ── data health fields (set at write time, used by tune_weights.py to filter degraded records) ──
+  active_exchanges  int      — exchanges with pct_zero < 0.7 for this symbol
+  leader_count      int      — leader-class exchanges active; 0 means use_leader_cons=False
+  exec_count        int      — exec venues with ≥1 valid rate in smoothing window
+                               CRITICAL: leader_gap=0.0 is ambiguous without this field.
+                               When exec_count=0, leader_gap=0 means "missing data", NOT "aligned".
+                               tune_weights.py filters out records where exec_count < min_exec_count.
+  missing_venues    list[str]— exec exchanges that had no valid rate in window
+  use_leader_cons   bool     — whether trend signal used leader consensus (True) or all exchanges
+  ref_rate_source   str      — "leaders" if ref_rate came from leader median; "consensus" if fallback
   # — filled in later by evaluate_signals.py —
   price_at_signal float | null
   price_500m      float | null
@@ -58,8 +68,23 @@ def build_signal_record(
     rate_std: float,
     venues: list[dict],
     best_venue: str | None,
+    # ── data health fields ────────────────────────────────────────────────────
+    active_exchanges: int,
+    leader_count: int,
+    exec_count: int,
+    missing_venues: list[str],
+    use_leader_cons: bool,
+    ref_rate_source: str,
 ) -> dict[str, Any]:
-    """Build a signal record dict ready for appending to the log."""
+    """
+    Build a signal record dict ready for appending to the log.
+
+    Data health fields are required so tune_weights.py can filter out records
+    where key inputs were missing or degraded:
+    - exec_count=0  → leader_gap=0.0 is a missing-data zero, not a true-alignment zero
+    - leader_count=0 → trend_persist used all exchanges (not leader consensus)
+    - ref_rate_source="consensus" → leader_gap computed against consensus fallback
+    """
     return {
         "logged_at":        datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
         "run_id":           run_id,
@@ -77,7 +102,14 @@ def build_signal_record(
         "rate_std":         rate_std,
         "venues":           venues,
         "best_venue":       best_venue,
-        # outcome fields — filled later
+        # ── data health ───────────────────────────────────────────────────────
+        "active_exchanges": active_exchanges,
+        "leader_count":     leader_count,
+        "exec_count":       exec_count,
+        "missing_venues":   missing_venues,
+        "use_leader_cons":  use_leader_cons,
+        "ref_rate_source":  ref_rate_source,
+        # ── outcome fields — filled later by evaluate_signals.py ───────────────
         "price_at_signal":  None,
         "price_500m":       None,
         "return_500m_pct":  None,

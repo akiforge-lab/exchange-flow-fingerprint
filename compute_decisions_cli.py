@@ -300,15 +300,20 @@ def compute_decisions(
 
         # ── 3. Per-venue rates + leader→exec gap ──────────────────────────────
         # venue_rates: {exchange: smoothed_rate} for exec exchanges present in data
-        venue_rates: dict[str, float] = {}
+        # venue_coverage: {exchange: fraction of sw window that was non-NaN}
+        venue_rates:    dict[str, float] = {}
+        venue_coverage: dict[str, float] = {}
         exec_active  = 0
         exec_leads   = []
         for ex in exec_exchanges:
             if ex not in pivot.columns:
                 continue
-            col_slice = pivot[ex].iloc[-sw:]
-            if col_slice.notna().any():
-                val = float(col_slice.mean())
+            col_slice   = pivot[ex].iloc[-sw:]
+            notna_count = int(col_slice.notna().sum())
+            cov         = notna_count / sw if sw > 0 else 0.0
+            venue_coverage[ex] = cov
+            if notna_count > 0:                    # any() → explicit count
+                val = float(col_slice.mean())      # pandas skips NaN — cov logged above
                 venue_rates[ex] = val
             m = _lead_score_for(delta, ex, signal_cons)
             if m:
@@ -321,12 +326,23 @@ def compute_decisions(
 
         leader_rate_now = (float(np.nanmedian(pivot[leader_cols].iloc[-sw:].values))
                            if leader_cols else float("nan"))
-        ref_rate = leader_rate_now if pd.notna(leader_rate_now) else current_rate
+        # ref_rate_source distinguishes "true leader rate" from "consensus fallback"
+        # so downstream consumers know whether leader_gap was computed against a real reference.
+        ref_rate_source = "leaders" if pd.notna(leader_rate_now) else "consensus"
+        ref_rate        = leader_rate_now if pd.notna(leader_rate_now) else current_rate
 
+        # leader_gap = 0.0 has two distinct causes:
+        #   (a) exec_rate_now is NaN  → missing data (exec_count == 0 in signal log)
+        #   (b) exec_rate_now ≈ ref_rate → true alignment
+        # Downstream tuning MUST filter on exec_count > 0 to avoid treating (a) as (b).
         if pd.notna(exec_rate_now) and rate_std > 1e-10:
             leader_gap = float(min(abs(exec_rate_now - ref_rate) / (rate_std + 1e-10) / 2.0, 1.0))
         else:
             leader_gap = 0.0
+
+        # Health fields — captured here, written to signal log, used by tune_weights.py
+        missing_venues = [ex for ex in exec_exchanges if ex not in venue_rates]
+        exec_count     = len(venue_rates)   # venues with ≥1 valid reading in window
 
         # ── 4. Data quality ───────────────────────────────────────────────────
         active_all = sum(1 for ex in delta.columns if pz.get(ex, 1.0) < 0.7)
@@ -372,7 +388,10 @@ def compute_decisions(
         venue_scores_list: list[dict] = []
         best_v: str | None = None
         if _venue_ranking_ok and venue_rates and direction != "NEUTRAL":
-            scores = rank_venues(direction, venue_rates, ref_rate, rate_std)
+            scores = rank_venues(
+                direction, venue_rates, ref_rate, rate_std,
+                coverage=venue_coverage,   # enables "stale" classification
+            )
             venue_scores_list = venues_to_dict(scores)
             best_v = _best_venue(scores)
 
@@ -392,21 +411,28 @@ def compute_decisions(
         if _sig_append is not None:
             build_fn, _ = _sig_append
             rec = build_fn(
-                run_id        = run_id,
-                symbol        = sym,
-                direction     = direction,
-                confidence    = confidence,
-                opportunity   = bool(opportunity),
-                watch_score   = watch_score,
-                rate_zscore   = rate_zscore,
-                trend_persist = trend_persist,
-                leader_gap    = leader_gap,
-                exec_lag      = exec_lag if pd.notna(exec_lag) else None,
-                data_qual     = data_qual,
-                cons_rate     = float(current_rate),
-                rate_std      = float(rate_std),
-                venues        = venue_scores_list,
-                best_venue    = best_v,
+                run_id          = run_id,
+                symbol          = sym,
+                direction       = direction,
+                confidence      = confidence,
+                opportunity     = bool(opportunity),
+                watch_score     = watch_score,
+                rate_zscore     = rate_zscore,
+                trend_persist   = trend_persist,
+                leader_gap      = leader_gap,
+                exec_lag        = exec_lag if pd.notna(exec_lag) else None,
+                data_qual       = data_qual,
+                cons_rate       = float(current_rate),
+                rate_std        = float(rate_std),
+                venues          = venue_scores_list,
+                best_venue      = best_v,
+                # ── data health fields ────────────────────────────────────────
+                active_exchanges = active_all,
+                leader_count     = len(leader_cols),
+                exec_count       = exec_count,
+                missing_venues   = missing_venues,
+                use_leader_cons  = use_leader_cons,
+                ref_rate_source  = ref_rate_source,
             )
             signal_records.append(rec)
 
