@@ -8,6 +8,10 @@ data/.auto.json
 data/.collector.pid
 data/.decisions.json
 
+# signal log and scoring config (user-specific, generated at runtime)
+data/signal_log.jsonl
+# scoring_config.json is intentionally tracked — commit it when you tune weights
+
 # pipeline runtime artifacts
 data/fetch.log
 data/pipeline.log
